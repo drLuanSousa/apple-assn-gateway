@@ -1,17 +1,50 @@
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+
+// Apple's public JWKS for ASSN v2
+const APPLE_JWKS = createRemoteJWKSet(
+  new URL('https://apple-public.keys.storekit.itunes.apple.com/keys')
+);
+
+async function verifyAndDecode(jws) {
+  const { payload } = await jwtVerify(jws, APPLE_JWKS, { algorithms: ['ES256'] });
+  return payload;
+}
+
+function msToIso(ms) {
+  if (!ms) return null;
+  const n = Number(ms);
+  return new Date(n > 1e12 ? n : n * 1000).toISOString();
+}
+
+function mapOperation(note, renInfo) {
+  const t = (note?.notificationType || '').toUpperCase();
+  switch (t) {
+    case 'SUBSCRIBED': return 'purchase';
+    case 'DID_RENEW': return 'renew';
+    case 'DID_CHANGE_RENEWAL_STATUS':
+      return (renInfo?.autoRenewStatus === 'OFF') ? 'auto_renew_off' : 'auto_renew_on';
+    case 'DID_FAIL_TO_RENEW': return 'renew_failed';
+    case 'GRACE_PERIOD_EXPIRED': return 'grace_expired';
+    case 'EXPIRED': return 'expired';
+    case 'REFUND':
+    case 'REVOKE': return 'revoked';
+    default: return t.toLowerCase() || 'other';
+  }
+}
+
+// Vercel serverless function
 export default async function handler(req, res) {
-  // Health check
   if (req.method === 'GET') return res.status(200).send('ok');
   if (req.method !== 'POST') return res.status(405).send('method not allowed');
 
   try {
-    // ✅ Case 1: Apple ASSN v2 (with signedPayload)
+    // ✅ Case 1: Subscription notification (ASSN v2 with signedPayload)
     if (req.body?.signedPayload) {
       const { signedPayload } = req.body;
 
-      // 1) Verify the top-level JWS
+      // Verify & decode JWS layers
       const note = await verifyAndDecode(signedPayload);
 
-      // 2) Decode nested JWS (if present)
       const txnInfo = note?.data?.signedTransactionInfo
         ? await verifyAndDecode(note.data.signedTransactionInfo)
         : null;
@@ -20,7 +53,7 @@ export default async function handler(req, res) {
         ? await verifyAndDecode(note.data.signedRenewalInfo)
         : null;
 
-      // 3) Normalize for Bubble
+      // Normalize data
       const productId = txnInfo?.productId || renInfo?.autoRenewPreference || '';
       const expiresIso = msToIso(txnInfo?.expiresDate);
       const operation = mapOperation(note, renInfo);
@@ -44,7 +77,7 @@ export default async function handler(req, res) {
         app_account_token: txnInfo?.appAccountToken || renInfo?.appAccountToken || ''
       };
 
-      // Forward to Bubble
+      // Forward to Bubble backend
       const forward = await fetch(process.env.BUBBLE_HOOK_URL, {
         method: 'POST',
         headers: {
@@ -57,7 +90,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ forwardedStatus: forward.status });
     }
 
-    // ✅ Case 2: Apple Ping / simple webhook (no signedPayload)
+    // ✅ Case 2: Ping/basic event (no signedPayload)
     console.log('Webhook ping or basic event:', req.body);
     return res.status(200).json({ received: true, body: req.body });
 
