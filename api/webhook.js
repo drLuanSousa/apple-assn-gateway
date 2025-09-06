@@ -1,27 +1,24 @@
-import { createLocalJWKSet, jwtVerify, decodeProtectedHeader } from 'jose';
+import { jwtVerify, decodeProtectedHeader, importJWK } from 'jose';
 import fs from 'fs';
 import path from 'path';
 
-// Load Apple's public JWKS (cached locally in apple_keys.json)
-const appleKeysPath = path.join(process.cwd(), 'api', 'apple_keys.json'); // adjust if your file is elsewhere
-const appleKeys = JSON.parse(fs.readFileSync(appleKeysPath, 'utf8'));
-const APPLE_JWKS = createLocalJWKSet(appleKeys);
+// Load Apple JWKS locally (apple_keys.json must be in the /api folder)
+const appleKeysPath = path.join(process.cwd(), 'api', 'apple_keys.json');
+const appleKeys = JSON.parse(fs.readFileSync(appleKeysPath, 'utf8')).keys;
 
 async function verifyAndDecode(jws) {
-  // Extract Key ID (kid) from JWS header
+  // Extract kid from JWS header
   const { kid } = decodeProtectedHeader(jws);
 
-  // Verify and let jose pick only the matching key
-  const { payload } = await jwtVerify(jws, APPLE_JWKS, {
-    algorithms: ['ES256'],
-    // Pass a custom key selection function
-    key: async (header, keys) => {
-      const match = keys.find(k => k.kid === kid);
-      if (!match) throw new Error(`No matching key for kid: ${kid}`);
-      return match;
-    }
-  });
+  // Find the matching JWK
+  const jwk = appleKeys.find(k => k.kid === kid);
+  if (!jwk) throw new Error(`No matching JWK found for kid=${kid}`);
 
+  // Convert JWK → KeyLike
+  const key = await importJWK(jwk, 'ES256');
+
+  // Verify the JWS
+  const { payload } = await jwtVerify(jws, key, { algorithms: ['ES256'] });
   return payload;
 }
 
