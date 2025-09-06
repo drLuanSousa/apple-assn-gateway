@@ -1,4 +1,4 @@
-import { jwtVerify, decodeProtectedHeader, importJWK } from 'jose';
+import { jwtVerify, decodeProtectedHeader, importJWK, importX509 } from 'jose';
 import fs from 'fs';
 import path from 'path';
 
@@ -14,15 +14,27 @@ async function verifyAndDecode(jws) {
 
   console.log('📜 Raw JWS sample:', jws.slice(0, 40));
 
-  const { kid } = decodeProtectedHeader(jws);
-  console.log('🔑 Decoding JWS with kid:', kid);
+  const header = decodeProtectedHeader(jws);
+  console.log('🔑 Decoding JWS header:', header);
 
-  const jwk = appleKeys.find(k => k.kid === kid);
-  if (!jwk) throw new Error(`No matching JWK found for kid=${kid}`);
+  if (header.kid) {
+    // ✅ Normal case (production) → verify against local JWKS
+    const jwk = appleKeys.find(k => k.kid === header.kid);
+    if (!jwk) throw new Error(`No matching JWK found for kid=${header.kid}`);
+    const key = await importJWK(jwk, 'ES256');
+    const { payload } = await jwtVerify(jws, key, { algorithms: ['ES256'] });
+    return payload;
+  }
 
-  const key = await importJWK(jwk, 'ES256');
-  const { payload } = await jwtVerify(jws, key, { algorithms: ['ES256'] });
-  return payload;
+  if (header.x5c && header.x5c.length > 0) {
+    // ✅ Sandbox test case → verify against cert in x5c
+    const cert = `-----BEGIN CERTIFICATE-----\n${header.x5c[0]}\n-----END CERTIFICATE-----`;
+    const key = await importX509(cert, 'ES256');
+    const { payload } = await jwtVerify(jws, key, { algorithms: ['ES256'] });
+    return payload;
+  }
+
+  throw new Error('No kid or x5c found in JWS header');
 }
 
 function msToIso(ms) {
