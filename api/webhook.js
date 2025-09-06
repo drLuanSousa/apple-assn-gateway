@@ -11,10 +11,15 @@ async function verifyAndDecode(jws) {
   // Extract Key ID (kid) from JWS header
   const { kid } = decodeProtectedHeader(jws);
 
-  // Verify using the matching key
+  // Verify and let jose pick only the matching key
   const { payload } = await jwtVerify(jws, APPLE_JWKS, {
     algorithms: ['ES256'],
-    kid,
+    // Pass a custom key selection function
+    key: async (header, keys) => {
+      const match = keys.find(k => k.kid === kid);
+      if (!match) throw new Error(`No matching key for kid: ${kid}`);
+      return match;
+    }
   });
 
   return payload;
