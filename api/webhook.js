@@ -8,21 +8,19 @@ const appleKeys = JSON.parse(fs.readFileSync(appleKeysPath, 'utf8')).keys;
 
 async function verifyAndDecode(jws) {
   if (typeof jws !== 'string') {
-    console.error('❌ verifyAndDecode called with non-string JWS:', jws);
-    throw new Error('Invalid JWS input (not a string)');
+    console.error('❌ verifyAndDecode got non-string JWS:', jws);
+    throw new Error('Invalid JWS input');
   }
 
-  // Extract kid from JWS header
+  console.log('📜 Raw JWS sample:', jws.slice(0, 40));
+
   const { kid } = decodeProtectedHeader(jws);
   console.log('🔑 Decoding JWS with kid:', kid);
 
   const jwk = appleKeys.find(k => k.kid === kid);
   if (!jwk) throw new Error(`No matching JWK found for kid=${kid}`);
 
-  // Convert JWK → KeyLike
   const key = await importJWK(jwk, 'ES256');
-
-  // Verify the JWS
   const { payload } = await jwtVerify(jws, key, { algorithms: ['ES256'] });
   return payload;
 }
@@ -55,9 +53,24 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('method not allowed');
 
   try {
+    // ✅ Parse raw body (not auto-decoded JSON)
+    const rawBody = await new Promise((resolve, reject) => {
+      let data = '';
+      req.on('data', chunk => (data += chunk));
+      req.on('end', () => resolve(data));
+      req.on('error', reject);
+    });
+
+    let body;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      body = {};
+    }
+
     // ✅ Case 1: Subscription notification (ASSN v2 with signedPayload)
-    if (req.body?.signedPayload) {
-      const { signedPayload } = req.body;
+    if (body?.signedPayload) {
+      const { signedPayload } = body;
 
       // Verify & decode JWS layers
       const note = await verifyAndDecode(String(signedPayload));
@@ -110,8 +123,8 @@ export default async function handler(req, res) {
     }
 
     // ✅ Case 2: Ping/basic event (no signedPayload)
-    console.log('📡 Webhook ping or basic event:', req.body);
-    return res.status(200).json({ received: true, body: req.body });
+    console.log('📡 Webhook ping or basic event:', body);
+    return res.status(200).json({ received: true, body });
 
   } catch (e) {
     console.error('❌ Webhook error:', e);
