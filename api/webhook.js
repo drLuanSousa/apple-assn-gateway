@@ -7,10 +7,15 @@ const appleKeysPath = path.join(process.cwd(), 'api', 'apple_keys.json');
 const appleKeys = JSON.parse(fs.readFileSync(appleKeysPath, 'utf8')).keys;
 
 async function verifyAndDecode(jws) {
+  if (typeof jws !== 'string') {
+    console.error('❌ verifyAndDecode called with non-string JWS:', jws);
+    throw new Error('Invalid JWS input (not a string)');
+  }
+
   // Extract kid from JWS header
   const { kid } = decodeProtectedHeader(jws);
+  console.log('🔑 Decoding JWS with kid:', kid);
 
-  // Find the matching JWK
   const jwk = appleKeys.find(k => k.kid === kid);
   if (!jwk) throw new Error(`No matching JWK found for kid=${kid}`);
 
@@ -55,14 +60,14 @@ export default async function handler(req, res) {
       const { signedPayload } = req.body;
 
       // Verify & decode JWS layers
-      const note = await verifyAndDecode(signedPayload);
+      const note = await verifyAndDecode(String(signedPayload));
 
       const txnInfo = note?.data?.signedTransactionInfo
-        ? await verifyAndDecode(note.data.signedTransactionInfo)
+        ? await verifyAndDecode(String(note.data.signedTransactionInfo))
         : null;
 
       const renInfo = note?.data?.signedRenewalInfo
-        ? await verifyAndDecode(note.data.signedRenewalInfo)
+        ? await verifyAndDecode(String(note.data.signedRenewalInfo))
         : null;
 
       // Normalize data for Bubble
@@ -89,6 +94,8 @@ export default async function handler(req, res) {
         app_account_token: txnInfo?.appAccountToken || renInfo?.appAccountToken || ''
       };
 
+      console.log('✅ Normalized payload ready to forward:', out);
+
       // Forward to Bubble backend
       const forward = await fetch(process.env.BUBBLE_HOOK_URL, {
         method: 'POST',
@@ -103,11 +110,11 @@ export default async function handler(req, res) {
     }
 
     // ✅ Case 2: Ping/basic event (no signedPayload)
-    console.log('Webhook ping or basic event:', req.body);
+    console.log('📡 Webhook ping or basic event:', req.body);
     return res.status(200).json({ received: true, body: req.body });
 
   } catch (e) {
-    console.error('Webhook error:', e);
+    console.error('❌ Webhook error:', e);
     return res.status(400).send(String(e));
   }
 }
