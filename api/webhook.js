@@ -1,14 +1,22 @@
-import { createLocalJWKSet, jwtVerify } from 'jose';
+import { createLocalJWKSet, jwtVerify, decodeProtectedHeader } from 'jose';
 import fs from 'fs';
 import path from 'path';
 
-// Load Apple's public JWKS (cached locally)
-const appleKeysPath = path.join(process.cwd(), 'api', 'apple_keys.json'); // adjust if file is elsewhere
+// Load Apple's public JWKS (cached locally in apple_keys.json)
+const appleKeysPath = path.join(process.cwd(), 'api', 'apple_keys.json'); // adjust if your file is elsewhere
 const appleKeys = JSON.parse(fs.readFileSync(appleKeysPath, 'utf8'));
 const APPLE_JWKS = createLocalJWKSet(appleKeys);
 
 async function verifyAndDecode(jws) {
-  const { payload } = await jwtVerify(jws, APPLE_JWKS, { algorithms: ['ES256'] });
+  // Extract Key ID (kid) from JWS header
+  const { kid } = decodeProtectedHeader(jws);
+
+  // Verify using the matching key
+  const { payload } = await jwtVerify(jws, APPLE_JWKS, {
+    algorithms: ['ES256'],
+    kid,
+  });
+
   return payload;
 }
 
@@ -55,7 +63,7 @@ export default async function handler(req, res) {
         ? await verifyAndDecode(note.data.signedRenewalInfo)
         : null;
 
-      // Normalize data
+      // Normalize data for Bubble
       const productId = txnInfo?.productId || renInfo?.autoRenewPreference || '';
       const expiresIso = msToIso(txnInfo?.expiresDate);
       const operation = mapOperation(note, renInfo);
