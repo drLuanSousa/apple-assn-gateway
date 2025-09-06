@@ -1,7 +1,10 @@
 import { createLocalJWKSet, jwtVerify } from 'jose';
-import appleKeys from './apple_keys.json' assert { type: 'json' };
+import fs from 'fs';
+import path from 'path';
 
-// Load Apple's public JWKS for ASSN v2 locally (cached file)
+// Load Apple's public JWKS (cached locally)
+const appleKeysPath = path.join(process.cwd(), 'api', 'apple_keys.json'); // adjust if file is elsewhere
+const appleKeys = JSON.parse(fs.readFileSync(appleKeysPath, 'utf8'));
 const APPLE_JWKS = createLocalJWKSet(appleKeys);
 
 async function verifyAndDecode(jws) {
