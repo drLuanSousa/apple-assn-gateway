@@ -1,9 +1,8 @@
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { createLocalJWKSet, jwtVerify } from 'jose';
+import appleKeys from './apple_keys.json' assert { type: 'json' };
 
-// Apple's public JWKS for ASSN v2
-const APPLE_JWKS = createRemoteJWKSet(
-  new URL('https://apple-public.keys.storekit.itunes.apple.com/keys')
-);
+// Load Apple's public JWKS for ASSN v2 locally (cached file)
+const APPLE_JWKS = createLocalJWKSet(appleKeys);
 
 async function verifyAndDecode(jws) {
   const { payload } = await jwtVerify(jws, APPLE_JWKS, { algorithms: ['ES256'] });
